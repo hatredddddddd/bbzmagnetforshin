@@ -1,6 +1,6 @@
 -- Ball Magnet + Hitbox Expander (Matcha)
 -- Both are client-side. They only "work" if the game decides hits / ball contact on YOUR client
--- (or you own the ball's network ownership). Test each and see which one the game respects.
+-- (or you own the ball's network ownership).
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
@@ -17,7 +17,6 @@ local function getRoot(char)
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
--- remember original sizes so we can restore them
 local original = {}
 
 local function setHitbox(player, size)
@@ -39,23 +38,41 @@ local function restoreHitboxes()
 end
 
 -- ===== menu =====
+-- The tab callback runs EVERY frame, so anything one-time (hotkey overlay) is guarded,
+-- and each widget is wrapped so one failing call can't hide the rest of the menu.
 local magKb, hbKb
+local hotkeysAdded = false
+local reported = {}
+
+local function safe(label, fn)
+    local ok, err = pcall(fn)
+    if not ok and not reported[label] then
+        reported[label] = true
+        print("[UI] '" .. label .. "' failed: " .. tostring(err))
+    end
+end
+
 UI.AddTab("Hitbox & Magnet", function(tab)
     local mag = tab:Section("Ball Magnet", "Left")
-    mag:Toggle("mg_on", "Magnet")
-    magKb = mag:Keybind("mg_kb", 0x47, "toggle")  -- G
-    magKb:AddToHotkey("Magnet", "mg_on")
-    mag:SliderInt("mg_range", "Range (studs)", 5, 60, 20)
-    mag:SliderFloat("mg_strength", "Pull Strength", 5.0, 120.0, 40.0, "%.0f")
-    mag:Combo("mg_mode", "Mode", {"Velocity pull", "Snap to hand"}, 0)
-    mag:Tip("Velocity pull is more likely to replicate; Snap is more aggressive")
+    safe("mg_on", function() mag:Toggle("mg_on", "Magnet") end)
+    safe("mg_kb", function() magKb = mag:Keybind("mg_kb", 0x47, "toggle") end) -- G
+    safe("mg_range", function() mag:SliderInt("mg_range", "Range (studs)", 5, 60, 20) end)
+    safe("mg_strength", function() mag:SliderInt("mg_strength", "Pull Strength", 5, 120, 40) end)
+    safe("mg_mode", function() mag:Combo("mg_mode", "Mode", {"Velocity pull", "Snap to hand"}, 0) end)
 
     local hb = tab:Section("Hitbox Expander", "Right")
-    hb:Toggle("hb_on", "Expand Enemy Hitboxes")
-    hbKb = hb:Keybind("hb_kb", 0x48, "toggle")    -- H
-    hbKb:AddToHotkey("Hitbox", "hb_on")
-    hb:SliderInt("hb_size", "Size", 2, 30, 8)
-    hb:Toggle("hb_team", "Team Check", true)
+    safe("hb_on", function() hb:Toggle("hb_on", "Expand Enemy Hitboxes") end)
+    safe("hb_kb", function() hbKb = hb:Keybind("hb_kb", 0x48, "toggle") end) -- H
+    safe("hb_size", function() hb:SliderInt("hb_size", "Size", 2, 30, 8) end)
+    safe("hb_team", function() hb:Toggle("hb_team", "Team Check", true) end)
+
+    if not hotkeysAdded and magKb and hbKb then
+        hotkeysAdded = true
+        safe("hotkeys", function()
+            magKb:AddToHotkey("Magnet", "mg_on")
+            hbKb:AddToHotkey("Hitbox", "hb_on")
+        end)
+    end
 end)
 
 -- ===== ball magnet loop =====
@@ -68,10 +85,10 @@ task.spawn(function()
             if ball and root then
                 local toMe = root.Position - ball.Position
                 local dist = toMe.Magnitude
-                if dist <= UI.GetValue("mg_range") and dist > 1.5 then
-                    if UI.GetValue("mg_mode") == 0 then
+                if dist <= (UI.GetValue("mg_range") or 20) and dist > 1.5 then
+                    if (UI.GetValue("mg_mode") or 0) == 0 then
                         pcall(function()
-                            ball.AssemblyLinearVelocity = toMe.Unit * UI.GetValue("mg_strength")
+                            ball.AssemblyLinearVelocity = toMe.Unit * (UI.GetValue("mg_strength") or 40)
                         end)
                     else
                         pcall(function()
@@ -91,7 +108,7 @@ task.spawn(function()
         wait(0.25)
         local on = UI.GetValue("hb_on") and (hbKb == nil or hbKb:IsEnabled())
         if on then
-            local s = UI.GetValue("hb_size")
+            local s = UI.GetValue("hb_size") or 8
             local size = Vector3.new(s, s, s)
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= LocalPlayer then
